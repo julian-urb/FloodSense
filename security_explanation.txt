@@ -1,0 +1,226 @@
+================================================================================
+FLOODSENSE SECURITY IMPLEMENTATION DOCUMENTATION
+================================================================================
+
+Date: 2026-04-13
+System: FloodSense - Flood Risk Decision-Support System for Metro Manila
+Version: 1.0
+
+================================================================================
+1. OVERVIEW
+================================================================================
+
+This document describes the security measures implemented in the FloodSense
+application to protect against common vulnerabilities and ensure data integrity.
+
+================================================================================
+2. SECURITY MEASURES IMPLEMENTED
+================================================================================
+
+2.1 ENVIRONMENT-BASED API KEY MANAGEMENT
+-----------------------------------------
+
+Problem: The original code contained a hardcoded API key exposed in source code.
+
+Solution: 
+- API key is now loaded from environment variable WEATHER_API_KEY
+- Falls back to empty string if not configured
+- Prevents accidental exposure in version control
+- Allows rotation without code changes
+
+Implementation:
+    # Configuration loading
+    def get_secure_config():
+        config = {
+            "weather_api_key": os.environ.get("WEATHER_API_KEY", ""),
+            ...
+        }
+        return config
+
+Usage:
+    export WEATHER_API_KEY="your-api-key-here"
+
+--------------------------------------------------------------------------------
+
+2.2 INPUT VALIDATION AND SANITIZATION
+--------------------------------------
+
+Problem: User inputs (city names, rainfall, elevation) were not validated,
+allowing potential injection attacks or out-of-bounds values.
+
+Solution:
+- City names validated against a whitelist of allowed NCR cities
+- Numeric inputs clamped to safe ranges
+- String inputs sanitized using regex pattern matching
+
+Implementation:
+    def sanitize_input(value: str, pattern: str = r'^[a-zA-Z0-9\s\-_,]+$') -> str:
+        """Sanitize input string to prevent injection attacks."""
+        if not value or not re.match(pattern, str(value)):
+            return ""
+        return value.strip()
+
+    def validate_numeric_input(value: float, min_val: float, max_val: float) -> float:
+        """Validate and clamp numeric input within safe bounds."""
+        try:
+            value = float(value)
+            return max(min_val, min(max_val, value))
+        except (ValueError, TypeError):
+            return min_val
+
+    def validate_city_name(city_name, allowed_cities: list) -> bool:
+        """Validate city name against whitelist."""
+        if city_name is None or not isinstance(city_name, str):
+            return False
+        sanitized = sanitize_input(city_name)
+        return sanitized in allowed_cities
+
+Security Boundaries:
+- Rainfall: 0.0 - 500.0 mm
+- Elevation: -10.0 - 2000.0 meters
+- Distance to river: 0 - 50,000 meters
+- Evacuees: 100 - 500,000 persons
+
+--------------------------------------------------------------------------------
+
+2.3 HMAC REQUEST SIGNING
+-------------------------
+
+Problem: API requests could be intercepted and modified without detection.
+
+Solution:
+- Implements HMAC-SHA256 for request/response integrity verification
+- Uses a secret key loaded from environment variable HMAC_SECRET_KEY
+- Generates signature for each request
+- Verifies response integrity
+
+Implementation:
+    def generate_hmac_signature(data: str, secret: str) -> str:
+        """Generate HMAC-SHA256 signature for request verification."""
+        return hmac.new(
+            secret.encode('utf-8'),
+            data.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+    def verify_hmac_signature(data: str, signature: str, secret: str) -> bool:
+        """Verify HMAC-SHA256 signature."""
+        expected_signature = generate_hmac_signature(data, secret)
+        return hmac.compare_digest(expected_signature, signature)
+
+Usage:
+    export HMAC_SECRET_KEY="your-secure-secret-key"
+
+--------------------------------------------------------------------------------
+
+2.4 SECURITY EVENT LOGGING
+---------------------------
+
+Problem: No audit trail for security-related events.
+
+Solution:
+- Logs security events to security_log.txt
+- Tracks: invalid inputs, API failures, signature verification failures
+- Uses constant-time comparison for sensitive operations
+
+Implementation:
+    def log_security_event(event_type: str, details: str):
+        """Log security-related events."""
+        try:
+            log_file = "security_log.txt"
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(log_file, "a") as f:
+                f.write(f"[{timestamp}] {event_type}: {details}\n")
+        except Exception:
+            pass
+
+Logged Events:
+- API_KEY_MISSING: Attempted API call without key
+- INVALID_CITY: Invalid city input detected
+- INPUT_CLAMPED: Input values modified due to bounds
+- API_TIMEOUT: WeatherAPI request timed out
+- API_CONNECTION_ERROR: Connection failure
+- API_AUTH_FAILURE: Invalid API key
+- SIGNATURE_VERIFICATION_FAILED: HMAC mismatch
+
+================================================================================
+3. CONFIGURATION
+================================================================================
+
+Environment Variables Required:
+--------------------------------
+WEATHER_API_KEY     - Your WeatherAPI.com API key
+HMAC_SECRET_KEY     - Secret key for HMAC signing (min 32 chars recommended)
+
+Optional Security Configuration:
+---------------------------------
+The CONFIG dictionary in app.py contains security boundaries:
+    "max_rainfall_mm": 500.0,
+    "min_elevation_m": -10.0,
+    "max_elevation_m": 2000.0,
+    "max_distance_to_river_m": 50000.0,
+    "max_evacuees": 500000,
+
+================================================================================
+4. HOW TO SET UP
+================================================================================
+
+1. Create a .env file in the project root:
+   
+   WEATHER_API_KEY=your-api-key-here
+   HMAC_SECRET_KEY=your-secure-random-secret-key
+
+2. Or set environment variables in your shell:
+   
+   Windows (PowerShell):
+       $env:WEATHER_API_KEY="your-api-key"
+       $env:HMAC_SECRET_KEY="your-secret"
+
+   Linux/Mac:
+       export WEATHER_API_KEY="your-api-key"
+       export HMAC_SECRET_KEY="your-secret"
+
+3. Run the application normally:
+   
+   streamlit run app.py
+
+================================================================================
+5. SECURITY LOG FILE
+================================================================================
+
+All security events are logged to security_log.txt in the project directory.
+Review this file regularly to monitor for suspicious activity.
+
+Log Format:
+    [YYYY-MM-DD HH:MM:SS] EVENT_TYPE: Event details
+
+================================================================================
+6. LIMITATIONS AND FUTURE IMPROVEMENTS
+================================================================================
+
+Current Limitations:
+- HMAC verification for WeatherAPI responses is best-effort (the external
+  API may not support response signing)
+- Rate limiting not implemented (consider adding for production)
+- No HTTPS enforcement (ensure deployment uses SSL/TLS)
+
+Recommended Future Improvements:
+- Add rate limiting for API calls
+- Implement session-based authentication
+- Add HTTPS/TLS enforcement
+- Implement request/response encryption for sensitive data
+- Add intrusion detection system (IDS)
+- Regular security audits and penetration testing
+
+================================================================================
+7. COMPLIANCE NOTES
+================================================================================
+
+This implementation follows these security best practices:
+- OWASP Top 10 (Input Validation, API Security)
+- NIST Security Guidelines
+- Principle of Defense in Depth
+
+================================================================================
+END OF DOCUMENTATION
+================================================================================
