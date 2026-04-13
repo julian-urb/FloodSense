@@ -13,38 +13,40 @@ integrated into the application.
 SECTION 1: SECURITY FUNCTIONS (Where They Are Defined)
 ================================================================================
 
-Line 29   - get_secure_config()
+floodsense/config.py
+--------------------
+Line 7    - get_secure_config()
            WHAT: Loads configuration from environment variables instead of 
                  hardcoding values in the source code.
            WHY:  Prevents API keys from being exposed in version control.
            CODE: Reads WEATHER_API_KEY and HMAC_SECRET_KEY from system env.
 
-Line 51   - generate_hmac_signature()
+Line 29   - generate_hmac_signature()
            WHAT: Creates a cryptographic signature using HMAC-SHA256.
            WHY:  Ensures request data cannot be tampered with undetected.
            CODE: hmac.new(secret, data, hashlib.sha256).hexdigest()
 
-Line 59   - verify_hmac_signature()
+Line 37   - verify_hmac_signature()
            WHAT: Verifies that received data matches the expected signature.
            WHY:  Detects if data was modified during transmission.
            CODE: Uses hmac.compare_digest() for timing-safe comparison.
 
-Line 64   - sanitize_input()
+Line 42   - sanitize_input()
            WHAT: Cleans string inputs using regex pattern matching.
            WHY:  Prevents injection attacks by removing special characters.
            CODE: Removes any characters NOT matching [a-zA-Z0-9\s\-_,]
 
-Line 70   - validate_numeric_input()
+Line 48   - validate_numeric_input()
            WHAT: Ensures numeric values stay within safe boundaries.
            WHY:  Prevents buffer overflow or unexpected behavior.
            CODE: Clamps values between min_val and max_val.
 
-Line 78   - validate_city_name()
+Line 56   - validate_city_name()
            WHAT: Checks if city name exists in the approved whitelist.
            WHY:  Prevents arbitrary input injection.
            CODE: Compares sanitized input against allowed_cities list.
 
-Line 87   - log_security_event()
+Line 65   - log_security_event()
            WHAT: Records security events to a log file.
            WHY:  Provides audit trail for security incidents.
            CODE: Writes timestamp and event details to security_log.txt.
@@ -53,20 +55,22 @@ Line 87   - log_security_event()
 SECTION 2: SECURITY CONFIGURATION
 ================================================================================
 
-Line 32   - CONFIG["weather_api_key"]
+floodsense/config.py - CONFIG Dictionary
+---------------------------------------
+Line 10   - CONFIG["weather_api_key"]
            Stores the WeatherAPI key loaded from environment variable.
            Previously: Hardcoded "790be5a013f54f0ca32103945260204"
            Now: os.environ.get("WEATHER_API_KEY", "")
 
-Line 33   - CONFIG["hmac_secret_key"]
+Line 11   - CONFIG["hmac_secret_key"]
            Secret key for HMAC signing, loaded from environment.
            Must be set to enable request signing.
 
-Line 34-52 - CONFIG["allowed_cities"]
+Line 12-18 - CONFIG["allowed_cities"]
            Whitelist of 17 valid NCR cities/municipalities.
            Users can ONLY select from these predefined options.
 
-Line 53-58 - CONFIG bounds
+Line 19-23 - CONFIG bounds
            Defines maximum values for inputs:
            - max_rainfall_mm: 500.0
            - max_elevation_m: 2000.0
@@ -77,71 +81,79 @@ Line 53-58 - CONFIG bounds
 SECTION 3: WHERE SECURITY FUNCTIONS ARE CALLED
 ================================================================================
 
-3.1 API STATUS CHECK (Lines 282, 299-310)
+3.1 API STATUS CHECK (floodsense/weather.py)
 -----------------------------------------
-    Line 282: check_api_status(weather_api_key)
-    Line 299: Logs API_TIMEOUT events
-    Line 302: Logs API_CONNECTION_ERROR events
-    Line 306: Logs API_AUTH_FAILURE events (invalid key)
-    Line 310: Logs API_ERROR events
-    
-    PURPOSE: Validates API key before making requests.
+weather.py Line 33:  check_api_status(weather_api_key)
+weather.py Line 47:  Logs API_TIMEOUT events
+weather.py Line 50:  Logs API_CONNECTION_ERROR events
+weather.py Line 54:  Logs API_AUTH_FAILURE events (invalid key)
+weather.py Line 58:  Logs API_ERROR events
 
-3.2 WEATHER DATA FETCH (Lines 322, 327, 335, 343-344)
------------------------------------------------------
-    Line 322: log_security_event("API_KEY_MISSING")
-              - Triggers if no API key is configured
-    
-    Line 327: log_security_event("INVALID_INPUT")
-              - Triggers if city name is empty/invalid
-    
-    Line 335: generate_hmac_signature(request_data, secret)
-              - Creates signature BEFORE making API request
-    
-    Line 343: verify_hmac_signature(data, signature, secret)
-              - Verifies response integrity AFTER receiving data
-    
-    Line 344: log_security_event("SIGNATURE_VERIFICATION_FAILED")
-              - Triggers if response was tampered with
+PURPOSE: Validates API key before making requests.
 
-3.3 MAIN APPLICATION INPUT VALIDATION (Lines 761-778)
--------------------------------------------------------
-    Line 761: validate_city_name(selected_city, CONFIG["allowed_cities"])
-              - Validates city selection against whitelist
-    
-    Line 762: log_security_event("INVALID_CITY")
-              - Logs invalid city selection attempts
-    
-    Line 766: validate_numeric_input(rainfall_mm, 0.0, 500.0)
-              - Ensures rainfall stays within 0-500mm
-    
-    Line 767: validate_numeric_input(risk_threshold, 0.0, 1.0)
-              - Ensures threshold stays within 0-1
-    
-    Line 768: validate_numeric_input(evacuees_count, 100, 500000)
-              - Ensures evacuees count stays within bounds
-    
-    Line 771: log_security_event("INPUT_CLAMPED")
-              - Logs when input values are modified for safety
-    
-    Line 778: log_security_event("INPUT_CLAMPED")
-              - Logs evacuees count clamping
+3.2 WEATHER DATA FETCH (floodsense/weather.py)
+---------------------------------------------
+weather.py Line 62:  get_weather_data(city_name, api_key)
+weather.py Line 65:  log_security_event("API_KEY_MISSING")
+                    - Triggers if no API key is configured
+
+weather.py Line 70:  log_security_event("INVALID_INPUT")
+                    - Triggers if city name is empty/invalid
+
+weather.py Line 78:  generate_hmac_signature(request_data, secret)
+                    - Creates signature BEFORE making API request
+
+weather.py Line 86:  verify_hmac_signature(data, signature, secret)
+                    - Verifies response integrity AFTER receiving data
+
+weather.py Line 87:  log_security_event("SIGNATURE_VERIFICATION_FAILED")
+                    - Triggers if response was tampered with
+
+3.3 MAIN APPLICATION INPUT VALIDATION (app.py)
+---------------------------------------------
+app.py Line 121: validate_city_name(selected_city, CONFIG["allowed_cities"])
+               - Validates city selection against whitelist
+
+app.py Line 122: log_security_event("INVALID_CITY", f"Invalid city input: {selected_city}")
+               - Logs invalid city selection attempts
+
+app.py Line 126: validate_numeric_input(rainfall_mm, 0.0, CONFIG["max_rainfall_mm"])
+               - Ensures rainfall stays within 0-500mm
+
+app.py Line 127: validate_numeric_input(risk_threshold, 0.0, 1.0)
+               - Ensures threshold stays within 0-1
+
+app.py Line 128: validate_numeric_input(evacuees_count, 100, CONFIG["max_evacuees"])
+               - Ensures evacuees count stays within bounds
+
+app.py Line 131: log_security_event("INPUT_CLAMPED", f"Rainfall value clamped from {rainfall_mm} to {validated_rainfall}")
+               - Logs when input values are modified for safety
+
+app.py Line 138: log_security_event("INPUT_CLAMPED", f"Evacuees value clamped from {evacuees_count} to {validated_evacuees}")
+               - Logs evacuees count clamping
 
 ================================================================================
 SECTION 4: REQUIRED IMPORTS
 ================================================================================
 
-Line 19   - import os
+floodsense/config.py
+-------------------
+Line 1    - import os
            Used for: Accessing environment variables
 
-Line 20   - import hmac
+Line 2    - import hmac
            Used for: HMAC-SHA256 signature generation and verification
 
-Line 21   - import hashlib
+Line 3    - import hashlib
            Used for: SHA256 hashing algorithm
 
-Line 22   - import re
+Line 4    - import re
            Used for: Regular expression input sanitization
+
+app.py (project root)
+---------------------
+Line 11   - from floodsense.config import CONFIG, validate_city_name, validate_numeric_input, log_security_event
+           Imports security functions into main app
 
 ================================================================================
 SECTION 5: ALGORITHM EXPLANATION
@@ -180,9 +192,16 @@ SECTION 7: HOW TO USE
 
 Before running the application, set environment variables:
 
-    export WEATHER_API_KEY="your-api-key"
-    export HMAC_SECRET_KEY="your-secret-key-min-32-chars"
-    streamlit run app.py
+    Linux/Mac:
+        export WEATHER_API_KEY="your-api-key"
+        export HMAC_SECRET_KEY="your-secret-key-min-32-chars"
+    
+    Windows (PowerShell):
+        $env:WEATHER_API_KEY="your-api-key"
+        $env:HMAC_SECRET_KEY="your-secret-key-min-32-chars"
+    
+    Then run:
+        streamlit run app.py
 
 Security events will be logged to: security_log.txt
 
